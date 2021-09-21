@@ -1,54 +1,68 @@
+# algorithm for solving sliding puzzle
+import numpy as np
 import heapq
 from memory_profiler import profile
-from puzzle import *
+# from puzzle import *
+import puzzle
+
+'''
+the listed algorithms are implemented: 
+- Breadth-First Search
+- Depth Limited Search
+- Heuristic Search (use A* algorithm)
+
+they followd the definition pattern as followed: 
+    def search(state: numpy.ndarray) -> action_seq: Optional[list[numpy.ndarray]] = None:
+        ...
+if solution is found, the action sequence(e.g., [[0, -1], [1, 0], ...]) is returned
+if solution is not fouund, None is returned
+
+'''
 
 
 
-# search algorithm
-# ----------------
-
-# 广度优先搜索，返回动作序列
-@profile
+# Breadth-First Search
+# if solution is found, return the solution's action sequence
+# if not found, return None
 def bfs(src_state):
     queue, state_visited = [], {}
-    # 为使图搜索不重复访问节点，需要为节点构建哈希表，
-    # 由于节点状态是矩阵（向量）不可哈希化，故将其转为字符串后哈希化。
+    # stringize the state(numpy.ndarray) to make it hashable
     state_visited[str(src_state)] = True
-    queue.append({'state': src_state, 'action_seq': []}) #存储节点
+    queue.append({'state': src_state, 'action_seq': []})
     
     while len(queue) > 0:
         now, queue = queue[0], queue[1:]
         now_state, now_action_seq = now['state'], now['action_seq']
+        assert isinstance(now_state, np.ndarray)
         
         # found
-        if is_equal(now_state, tgt_state):
+        if puzzle.is_equal(now_state, puzzle.tgt_state):
             return now_action_seq
         
         # not found, continue to explore
-        for action in get_action_space(now_state):
-            next_state, next_action_seq = get_next_state(now_state, action), now_action_seq + [action]
+        for action in puzzle.get_action_space(now_state):
+            next_state, next_action_seq = puzzle.get_next_state(now_state, action), now_action_seq + [action]
             if str(next_state) in state_visited:
                 continue
             state_visited[str(next_state)] = True
-            queue.append({'state': next_state, 'action_seq': next_action_seq})  #存储节点
+            queue.append({'state': next_state, 'action_seq': next_action_seq})
     
     # not found
     return None
 
 
-# 深度有限搜索，返回动作序列
-@profile
+# Depth Limited Search
+# if solution is found, return the solution's action sequence
+# if not found, return None
 def dfs(src_state, depth_limit=99):
-    # 由于dfs不具有最优性，为维持深度有限约束一致性，当节点以更短距离重复访问时不应被忽略
-    # 令state_visited存储各节点的深度，用于比较
+    # store the depth of visited node for comparison
     state_visited = {}
 
-    # 闭包
-    # 内部递归函数
+    # internal recursive function
     def _dfs(state, action_seq=[]):
         nonlocal state_visited, depth_limit
         
-        if is_equal(state, tgt_state):
+        if puzzle.is_equal(state, puzzle.tgt_state):
             # found
             return action_seq
         
@@ -58,51 +72,43 @@ def dfs(src_state, depth_limit=99):
         
         else:
             # try all possible action
-            for action in get_action_space(state):
-                next_state, next_action_seq = get_next_state(state, action), action_seq + [action]
-                # 若访问过，但此次以更短距离访问，有可能在有限深度内搜得更多结果，需再次进入
+            for action in puzzle.get_action_space(state):
+                next_state, next_action_seq = puzzle.get_next_state(state, action), action_seq + [action]
+                # if the same node is visited again in a shorter distance, it's possile to search more
+                # result under the same depth limitation, therefore it should not be ignored
                 if str(next_state) in state_visited and len(next_action_seq) >= state_visited[str(next_state)]:
                     continue
                 state_visited[str(next_state)] = len(next_action_seq)
                 res_action_seq = _dfs(next_state, next_action_seq) 
-                # if found, backtrack; else, continue to the next try
+                # if found, backtrack
                 if res_action_seq != None:
                     return res_action_seq
-            # not found
+
+            # all tried, not found
             return None
     
-    # 调用内部递归，若未找到则返回None
     action_seq = _dfs(src_state)
     return action_seq
 
 
 
-# 启发值函数1：不正确数码的数量(不包括空位)
-def get_incorrect_count(state):
-    res = (state != tgt_state).sum()
-    res -= (np.argwhere(state == 0) != np.argwhere(tgt_state == 0)).any()
-    return res
-
-# 启发值函数2：空位距离正确位置的曼哈顿距离
-def get_manhattan_dist(state):
-    pos_src = np.argwhere(state == 0)
-    pos_tgt = np.argwhere(tgt_state == 0)
-    res = np.abs(pos_src - pos_tgt).sum()
-    return res
 
 
-
-# 启发式搜索
-# h_func: 启发式函数
-@profile
+# template of Heuristic Search
+# @h_func(state: numpy.ndarray) -> Number: should return the heuristic estimation value of state
+# if solution is found, return the solution's action sequence
+# if not found, return None 
 def _heuristic_search(src_state, h_func):
-    # f(x) = g(x) + h(x)
-    # 其中g(x)为已知前继代价（深度），h(x)为估计后继代价，由启发式函数h_func给出
-    # 哈希表供查重，堆供查找最小元素，状态的字符串为堆的外键
+    '''
+    f(x) = g(x) + h(x)
+    g(x): present cost, i.e., depth of search
+    h(x): future estimated cost, given by heuristic function
+    f(x): comprehensive estimated cost
+    '''
     state_visited, _state_heap = {}, []
 
-    # 闭包
-    # 从堆中弹出最小值f_val对应的状态和动作序列
+    # function closure
+    # pop the node (state, action_seq, g_val, h_val) with largest f_val from heap
     def pop_heap():
         nonlocal state_visited, _state_heap
         f_val, state_str = heapq.heappop(_state_heap)
@@ -110,13 +116,13 @@ def _heuristic_search(src_state, h_func):
             state, action_seq, g_val, h_val = state_visited[state_str]
             return state, action_seq, g_val, h_val
         else:
-            return None, None, None
+            return None, None, None, None
         
-    # 压入栈
+    # push the node (state, action_seq, g_val, h_val) into heap (and map)
     def push_heap(state, action_seq, g_val, h_val):
         nonlocal state_visited, _state_heap
         state_visited[str(state)] = [
-            np.copy(state), # state
+            np.copy(state), # state, copied
             action_seq,     # action_seq
             g_val,          # g_val
             h_val           # h_val 
@@ -125,17 +131,17 @@ def _heuristic_search(src_state, h_func):
         
         
     # use A* algorithm
+    # always take the node with largest f_val as the next search node
     push_heap(state=src_state, action_seq=[], g_val=0, h_val=h_func(src_state))
-    
     while _state_heap != []:
         state, action_seq, g_val, h_val = pop_heap()
-        if is_equal(state, tgt_state):
+        if puzzle.is_equal(state, puzzle.tgt_state):
             # found
             return action_seq
         
         # not found, continue to explore
-        for action in get_action_space(state):
-            next_state, next_action_seq = get_next_state(state, action), action_seq + [action]
+        for action in puzzle.get_action_space(state):
+            next_state, next_action_seq = puzzle.get_next_state(state, action), action_seq + [action]
             next_g_val, next_h_val = g_val + 1, h_func(next_state)
             if str(next_state) in state_visited:
                 continue
@@ -144,13 +150,51 @@ def _heuristic_search(src_state, h_func):
     # not found
     return None
 
+def get_manhattan_dist(state):
+    pos_src = np.argwhere(state == 0)
+    pos_tgt = np.argwhere(puzzle.tgt_state == 0)
+    res = np.abs(pos_src - pos_tgt).sum()
+    return res
 
-# 启发式搜索1：采用不正确数码的数量作为启发值函数
-@profile
+
+# Heuristic Search 1: take the count of incorrect digits as heuristic function
+# if solution is found, return the solution's action sequence
+# if not found, return None 
 def heuristic_search_1(src_state):
-    return _heuristic_search(src_state, get_incorrect_count)
+    # heuristic function
+    # return the total count of incorrect digits (disclude vacancy)
+    def get_incorrect_count(state):
+        res = (state != puzzle.tgt_state).sum()
+        res -= (np.argwhere(state == 0) != np.argwhere(puzzle.tgt_state == 0)).any()
+        return res
+
+    return _heuristic_search(src_state, h_func=get_incorrect_count)
     
-# 启发式搜索2：采用空位距离正确位置的曼哈顿距离作为启发值函数
-@profile
+# Heuristic Search 1: take the manhattan distance for vacancy as heuristic function
+# if solution is found, return the solution's action sequence
+# if not found, return None 
 def heuristic_search_2(src_state):
+    # heruistic function
+    # return the manhattan distance for vacancy
+    # between the present position and the expected potision
+    def get_manhattan_dist(state):
+        pos_src = np.argwhere(state == 0)
+        pos_tgt = np.argwhere(puzzle.tgt_state == 0)
+        res = np.abs(pos_src - pos_tgt).sum()
+        return res
+
     return _heuristic_search(src_state, get_manhattan_dist)
+
+
+if __name__ == '__main__':
+    algo_list = [bfs, heuristic_search_1, heuristic_search_2]
+
+    for algo in algo_list:
+        state = puzzle.get_random_state(5)
+
+        action_seq = algo(state)
+        if action_seq != None: 
+            print('algorithm succeed')
+        else: 
+            print('algorithm failed')
+
